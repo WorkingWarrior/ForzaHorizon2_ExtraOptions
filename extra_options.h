@@ -90,5 +90,6 @@ typedef struct {
     int reserved_filtering_override;
     int photo_mode_samples;
     int enable_social, enable_clubs, enable_rivals;
+    int ultrawide_3440x1440;
 } ModOptions;
 #endif

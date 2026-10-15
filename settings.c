@@ -36,6 +36,7 @@ static const SettingDefinition legacy_settings[] = {
     SETTING("Frontend", "SpawnAtFestival", spawn_at_festival, SETTING_BOOLEAN),
     SETTING("Frontend", "SkipIneligibleCarDialogue", skip_ineligible_car_dialogue, SETTING_BOOLEAN),
     SETTING("Graphics", "SmoothSunShadows", smooth_sun_shadows, SETTING_BOOLEAN),
+    SETTING("Graphics", "Ultrawide3440x1440", ultrawide_3440x1440, SETTING_BOOLEAN),
     SETTING("HUD", "MinimapFollowsCamera", minimap_follows_camera, SETTING_BOOLEAN),
     SETTING("PhotoMode", "Samples", photo_mode_samples, SETTING_PHOTO_SAMPLES),
     {"Autodrive", "Cinematic", "AutodriveCinematic", offsetof(ModOptions, autodrive_cinematic),
@@ -80,6 +81,7 @@ void settings_defaults(ModOptions *options) {
         .enable_clubs = 1,
         .enable_rivals = 1,
         .photo_mode_samples = 256,
+        .ultrawide_3440x1440 = 0,
     };
 }
 

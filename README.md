@@ -56,6 +56,26 @@ Important: The 3 cars with proper roof animations (BMW Z4 iDrive, Mazda MX-5 (20
 Important #2: This is a rather experimental feature, so it doesn't look perfect in some cars due to the way the ForzaVista animations were authored.
 The Lotus Exige, for example, will have its roof floating above the car. It's beyond the view of the camera but you will spot its shadow. This will be looked into in future updates.
 
+For a 3440×1440 display with Azimuth 0.9.7, the experimental ultrawide mode can
+be enabled with:
+
+```ini
+[Graphics]
+Ultrawide3440x1440=1
+```
+
+Keep `resolution=screen` and `display=fullscreen` in `data/azimuth.ini`.
+The option changes the virtual DXGI output advertised to the game and the
+game's render-target width in memory before swap-chain creation. It does not
+modify `azimuth.exe` or the game's executable on disk.
+It is disabled by default and only applies to the inspected Azimuth 0.9.7 and
+game builds. Other resolutions and Azimuth versions are not yet supported.
+A live test with Proton Experimental at 3440×1440 showed the saved game
+rendering the world across the full screen with the car at its normal
+proportions. The pause menu also opened.
+Other game modes and menus remain untested. The rebased build has not yet been
+tested in gameplay.
+
 # Installation
 
 The installation is different depending on the translation layer you're using.

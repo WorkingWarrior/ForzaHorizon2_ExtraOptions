@@ -77,6 +77,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         log_set_directory(settings_directory);
         azimuth_apply_livery_compatibility();
         azimuth_apply_save_compatibility(options.disable_azimuth_save_checksums);
+        azimuth_apply_ultrawide(options.ultrawide_3440x1440, game_image);
     }
 #endif
     if (initialized && options.enabled) {
