@@ -68,13 +68,31 @@ Keep `resolution=screen` and `display=fullscreen` in `data/azimuth.ini`.
 The option changes the virtual DXGI output advertised to the game and the
 game's render-target width in memory before swap-chain creation. It does not
 modify `azimuth.exe` or the game's executable on disk.
-It is disabled by default and only applies to the inspected Azimuth 0.9.7 and
-game builds. Other resolutions and Azimuth versions are not yet supported.
-A live test with Proton Experimental at 3440×1440 showed the saved game
-rendering the world across the full screen with the car at its normal
-proportions. The pause menu also opened.
-Other game modes and menus remain untested. The rebased build has not yet been
-tested in gameplay.
+
+The game's XAML interface is authored for 1920×1080 and stretches horizontally
+unless its root scenes are scaled separately. With the game closed, run:
+
+```sh
+python3 tools/patch_ultrawide_ui.py apply "/path/to/Anthem_1.0.0.64_x64__8wekyb3d8bbwe"
+```
+
+The script supports only the inspected `Mount/media/UI.zip` and saves its
+original as `UI.zip.fh2-ultrawide-original` in the same folder. It changes
+30 XAML resources: the common page scale, HUD, 25 scenes with screen blur, and
+two shared blur styles. It preserves the game's custom ZIP layout. Use `check`
+instead of `apply` to inspect the archive, or `restore` to return it to the
+original bytes. Close the game before either operation.
+
+The DLL option is disabled by default and only applies to the inspected
+Azimuth 0.9.7 and game builds. Other resolutions and Azimuth versions are not
+yet supported. A live test with Proton Experimental at 3440×1440 showed the
+world filling the screen with normal car proportions, race autodrive working,
+and the centered UI during driving. The pause menu, car-meet confirmation, and
+car-selection screen were checked at 3440×1440: their controls keep their
+proportions, and the blurred backgrounds fill the screen. The other patched
+scenes passed XAML and archive integrity checks but were not all inspected in
+the running game. The title and loading artwork retain their original 16:9
+composition. Other game modes remain untested.
 
 # Installation
 
