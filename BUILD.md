@@ -16,12 +16,14 @@ The outputs are `../xg.dll` for Mezcal and `../azimuth-tls.dll` for Azimuth.
 `--output PATH` chooses another destination. `--build-dir PATH` keeps the
 intermediate files in that directory; otherwise they use a temporary directory.
 The script lists common modules explicitly and selects one layer adapter.
-Azimuth also includes its guarded host, livery and save compatibility modules.
+Azimuth also includes its guarded host, livery, save compatibility, and
+3440×1440 modules.
 All modules compile with warnings treated as errors and x64 unwind tables.
 
 On Linux, use the portable Linux Zig distribution and the same commands with
 `zig` as the compiler filename. The target remains a Windows DLL. Cross-build
-support is retained; Linux/Wine execution has not been tested.
+support is retained. The Azimuth 0.9.7 ultrawide mode was exercised under
+Proton Experimental at 3440×1440 in a saved game and the pause menu.
 
 The public exports are `Fh2TweaksStatus` on both adapters and the additional
 `azimuth_tls_index` / `azimuth_tls_attached` data exports on Azimuth. These names

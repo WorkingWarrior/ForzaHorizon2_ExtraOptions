@@ -34,18 +34,6 @@ static const HostPatchSet output_patches[] = {
     {0x3d820, 0x6f, mode_original_hash, mode_patched_hash,
      output_mode_patches, ARRAY_COUNT(output_mode_patches)}};
 
-/* RenderBuffer11 stores the dimensions used for both swap-chain creation and
-   DXGIXPresentArray's source rectangle. Change its width before creation. */
-typedef __int64(WINAPI *CreateGameSwapChainFn)(void *, void *, int, int);
-static CreateGameSwapChainFn original_create_swapchain;
-static int swapchain_logged;
-static const unsigned char swapchain_entry[17] = {
-    0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41,
-    0x56, 0x41, 0x57, 0x48, 0x8d, 0x6c, 0x24, 0xa0};
-static const unsigned char swapchain_hash[32] = {
-    0xa1, 0x5c, 0x1d, 0xa5, 0x98, 0x76, 0xff, 0xf8, 0x9e, 0xc6, 0xcc, 0xe2, 0xfb, 0x07, 0x35, 0xc9,
-    0x7a, 0x2e, 0x53, 0x7b, 0xab, 0xb2, 0x54, 0x48, 0x50, 0x32, 0x59, 0xc8, 0xe1, 0x10, 0x30, 0x70};
-
 /* This render-target initializer derives its width as height * 16 * (1/9).
    Give only this instruction 43/288; the shared 1/9 constant also belongs
    to unrelated rendering code. At height 1440 this yields width 3440. */
@@ -55,11 +43,39 @@ static const unsigned char render_width_hash[32] = {
     0xbe, 0x8c, 0x50, 0x44, 0xe2, 0xdd, 0x96, 0xce, 0x6b, 0x00, 0x64, 0x42, 0x9b, 0xd1, 0xcb, 0x0d,
     0x90, 0xf1, 0x7b, 0x0f, 0x05, 0xa3, 0xf6, 0x3d, 0xd1, 0xc0, 0xf6, 0xb1, 0xef, 0x98, 0x27, 0x01};
 
-static int install_render_width(unsigned char *game_image) {
-    unsigned char *site = game_image + 0x2211a3;
+typedef struct {
+    unsigned char *site;
+    unsigned char *factor;
+    unsigned char original[sizeof(render_width_instruction)];
+    DWORD original_protection;
+} RenderWidthPatch;
+
+/* Keep the factor allocated if rollback cannot make the instruction safe: the
+   processor may still execute a cached instruction that reads this address. */
+static int restore_render_width(RenderWidthPatch *patch) {
+    DWORD ignored;
+    if (!VirtualProtect(patch->site, sizeof(patch->original), PAGE_EXECUTE_READWRITE, &ignored)) {
+        return 0;
+    }
+    memory_copy(patch->site, patch->original, sizeof(patch->original));
+    int flushed = FlushInstructionCache(GetCurrentProcess(), patch->site,
+                                        sizeof(patch->original)) != 0;
+    int protected = VirtualProtect(patch->site, sizeof(patch->original),
+                                   patch->original_protection, &ignored) != 0;
+    if (!flushed || !protected) {
+        return 0;
+    }
+    VirtualFree(patch->factor, 0, MEM_RELEASE);
+    patch->factor = NULL;
+    return 1;
+}
+
+static int install_render_width(unsigned char *game_image, RenderWidthPatch *patch) {
+    patch->site = game_image + 0x2211a3;
+    patch->factor = NULL;
     unsigned char inspected[0x20], digest[32];
     Sha256Context hash;
-    if (!memory_read(site, inspected, sizeof(inspected)) ||
+    if (!memory_read(patch->site, inspected, sizeof(inspected)) ||
         !memory_equal(inspected, render_width_instruction, sizeof(render_width_instruction))) {
         return 0;
     }
@@ -69,120 +85,47 @@ static int install_render_width(unsigned char *game_image) {
     if (!memory_equal(digest, render_width_hash, sizeof(digest))) {
         return 0;
     }
+    memory_copy(patch->original, inspected, sizeof(patch->original));
     uintptr_t candidate = ((uintptr_t)game_image + GAME_IMAGE_SIZE + 0xffffu) & ~(uintptr_t)0xffffu;
-    unsigned char *constant = NULL;
-    for (unsigned attempt = 0; attempt < 256 && !constant; ++attempt) {
-        constant = (unsigned char *)VirtualAlloc((void *)(candidate + attempt * 0x100000u),
-                                                  4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    for (unsigned attempt = 0; attempt < 256 && !patch->factor; ++attempt) {
+        patch->factor = (unsigned char *)VirtualAlloc((void *)(candidate + attempt * 0x100000u),
+                                                      4096, MEM_RESERVE | MEM_COMMIT,
+                                                      PAGE_READWRITE);
     }
-    if (!constant) {
+    if (!patch->factor) {
         return -1;
     }
-    int64_t distance = (int64_t)(uintptr_t)constant - (int64_t)(uintptr_t)(site + 8);
+    int64_t distance = (int64_t)(uintptr_t)patch->factor -
+                       (int64_t)(uintptr_t)(patch->site + sizeof(patch->original));
     if (distance < INT32_MIN || distance > INT32_MAX) {
-        VirtualFree(constant, 0, MEM_RELEASE);
+        VirtualFree(patch->factor, 0, MEM_RELEASE);
+        patch->factor = NULL;
         return -1;
     }
     const uint32_t factor_bits = 0x3e18e38eu;
-    memory_copy(constant, &factor_bits, sizeof(factor_bits));
+    memory_copy(patch->factor, &factor_bits, sizeof(factor_bits));
     DWORD previous;
-    if (!VirtualProtect(constant, 4096, PAGE_READONLY, &previous)) {
-        VirtualFree(constant, 0, MEM_RELEASE);
+    if (!VirtualProtect(patch->factor, 4096, PAGE_READONLY, &previous)) {
+        VirtualFree(patch->factor, 0, MEM_RELEASE);
+        patch->factor = NULL;
         return -1;
     }
-    DWORD old_protection;
-    if (!VirtualProtect(site, sizeof(render_width_instruction), PAGE_EXECUTE_READWRITE,
-                        &old_protection)) {
-        VirtualFree(constant, 0, MEM_RELEASE);
+    if (!VirtualProtect(patch->site, sizeof(patch->original), PAGE_EXECUTE_READWRITE,
+                        &patch->original_protection)) {
+        VirtualFree(patch->factor, 0, MEM_RELEASE);
+        patch->factor = NULL;
         return -1;
     }
     int32_t displacement = (int32_t)distance;
-    memory_copy(site + 4, &displacement, sizeof(displacement));
+    memory_copy(patch->site + 4, &displacement, sizeof(displacement));
     DWORD ignored;
-    if (!FlushInstructionCache(GetCurrentProcess(), site, sizeof(render_width_instruction)) ||
-        !VirtualProtect(site, sizeof(render_width_instruction), old_protection, &ignored)) {
-        VirtualProtect(site, sizeof(render_width_instruction), PAGE_EXECUTE_READWRITE, &ignored);
-        memory_copy(site, inspected, sizeof(render_width_instruction));
-        FlushInstructionCache(GetCurrentProcess(), site, sizeof(render_width_instruction));
-        VirtualProtect(site, sizeof(render_width_instruction), old_protection, &ignored);
-        VirtualFree(constant, 0, MEM_RELEASE);
-        return -1;
+    int flushed = FlushInstructionCache(GetCurrentProcess(), patch->site,
+                                        sizeof(patch->original)) != 0;
+    int protected = VirtualProtect(patch->site, sizeof(patch->original),
+                                   patch->original_protection, &ignored) != 0;
+    if (!flushed || !protected) {
+        return restore_render_width(patch) ? -1 : -2;
     }
-    return 1;
-}
-
-static void absolute_jump(unsigned char *code, const void *target) {
-    static const unsigned char prefix[6] = {0xff, 0x25, 0, 0, 0, 0};
-    uintptr_t address = (uintptr_t)target;
-    memory_copy(code, prefix, sizeof(prefix));
-    memory_copy(code + sizeof(prefix), &address, sizeof(address));
-}
-
-static __int64 WINAPI ultrawide_create_swapchain(void *buffer, void *configuration, int format,
-                                                  int profile) {
-    unsigned *size = (unsigned *)buffer;
-    if (size[2] == 2560 && size[3] == 1440) {
-        size[2] = 3440;
-        if (!swapchain_logged) {
-            swapchain_logged = 1;
-            log_append("ULTRAWIDE: game RenderBuffer11 changed from 2560x1440 to 3440x1440.\r\n");
-        }
-    } else if (!swapchain_logged) {
-        swapchain_logged = 1;
-        log_append("ULTRAWIDE: game RenderBuffer11 did not contain 2560x1440; unchanged.\r\n");
-    }
-    return original_create_swapchain(buffer, configuration, format, profile);
-}
-
-static int install_swapchain_hook(unsigned char *game_image) {
-    unsigned char *entry = game_image + 0x10ca800;
-    unsigned char inspected[0x50];
-    unsigned char digest[32];
-    Sha256Context hash;
-    if (!memory_read(entry, inspected, sizeof(inspected)) ||
-        !memory_equal(inspected, swapchain_entry, sizeof(swapchain_entry))) {
-        return 0;
-    }
-    sha256_initialize(&hash);
-    sha256_update(&hash, inspected, sizeof(inspected));
-    sha256_finalize(&hash, digest);
-    if (!memory_equal(digest, swapchain_hash, sizeof(digest))) {
-        return 0;
-    }
-    HMODULE pinned;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                           (LPCWSTR)(uintptr_t)ultrawide_create_swapchain, &pinned)) {
-        return -1;
-    }
-    unsigned char *trampoline =
-        (unsigned char *)VirtualAlloc(NULL, 64, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!trampoline) {
-        return -1;
-    }
-    memory_copy(trampoline, swapchain_entry, sizeof(swapchain_entry));
-    absolute_jump(trampoline + sizeof(swapchain_entry), entry + sizeof(swapchain_entry));
-    DWORD trampoline_old;
-    if (!VirtualProtect(trampoline, 64, PAGE_EXECUTE_READ, &trampoline_old)) {
-        VirtualFree(trampoline, 0, MEM_RELEASE);
-        return -1;
-    }
-    original_create_swapchain = (CreateGameSwapChainFn)(uintptr_t)trampoline;
-    DWORD old_protection;
-    if (!VirtualProtect(entry, sizeof(swapchain_entry), PAGE_EXECUTE_READWRITE,
-                        &old_protection)) {
-        VirtualFree(trampoline, 0, MEM_RELEASE);
-        original_create_swapchain = NULL;
-        return -1;
-    }
-    unsigned char branch[17] = {0};
-    absolute_jump(branch, ultrawide_create_swapchain);
-    branch[14] = 0x90;
-    branch[15] = 0x90;
-    branch[16] = 0x90;
-    memory_copy(entry, branch, sizeof(branch));
-    FlushInstructionCache(GetCurrentProcess(), entry, sizeof(branch));
-    DWORD ignored;
-    VirtualProtect(entry, sizeof(branch), old_protection, &ignored);
     return 1;
 }
 
@@ -195,31 +138,28 @@ void azimuth_apply_ultrawide(int enabled, unsigned char *game_image) {
         log_append("ULTRAWIDE: unsupported Azimuth build; virtual display left unchanged.\r\n");
         return;
     }
-    int result = azimuth_patch_host_codes(host, output_patches, ARRAY_COUNT(output_patches));
-    if (result > 0) {
-        log_append("ULTRAWIDE: Azimuth virtual DXGI output set to 3440x1440.\r\n");
-    } else if (result < 0) {
-        log_append("ULTRAWIDE: could not change Azimuth memory protection; output left unchanged.\r\n");
-    } else {
-        log_append("ULTRAWIDE: unexpected Azimuth output code; output left unchanged.\r\n");
-    }
-    if (result <= 0) {
+    RenderWidthPatch render_width;
+    int width_result = install_render_width(game_image, &render_width);
+    if (width_result == 0) {
+        log_append("ULTRAWIDE: unexpected game render-target code; output left unchanged.\r\n");
         return;
     }
-    int hook_result = install_swapchain_hook(game_image);
-    if (hook_result > 0) {
-        log_append("ULTRAWIDE: game RenderBuffer11 swap-chain hook installed.\r\n");
-        int width_result = install_render_width(game_image);
-        if (width_result > 0) {
-            log_append("ULTRAWIDE: game render-target width changed to 3440 at height 1440.\r\n");
-        } else if (width_result < 0) {
-            log_append("ULTRAWIDE: could not install game render-target width patch.\r\n");
-        } else {
-            log_append("ULTRAWIDE: unexpected game render-target code; width patch skipped.\r\n");
-        }
-    } else if (hook_result < 0) {
-        log_append("ULTRAWIDE: could not install game swap-chain hook.\r\n");
-    } else {
-        log_append("ULTRAWIDE: unexpected game swap-chain code; hook skipped.\r\n");
+    if (width_result < 0) {
+        log_append(width_result == -2
+                       ? "ULTRAWIDE: render-target rollback failed; constant retained.\r\n"
+                       : "ULTRAWIDE: could not install game render-target width patch.\r\n");
+        return;
     }
+    int output_result = azimuth_patch_host_codes(host, output_patches, ARRAY_COUNT(output_patches));
+    if (output_result <= 0) {
+        int rolled_back = restore_render_width(&render_width);
+        log_append(output_result < 0
+                       ? "ULTRAWIDE: could not change Azimuth output.\r\n"
+                       : "ULTRAWIDE: unexpected Azimuth output code.\r\n");
+        log_append(rolled_back
+                       ? "ULTRAWIDE: game render-target patch rolled back.\r\n"
+                       : "ULTRAWIDE: game render-target rollback failed; constant retained.\r\n");
+        return;
+    }
+    log_append("ULTRAWIDE: Azimuth output and game render target set to 3440x1440.\r\n");
 }
