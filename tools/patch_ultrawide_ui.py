@@ -23,7 +23,7 @@ import zlib
 
 
 ORIGINAL_SHA256 = "33ecf0453f0d18f20408317c2bab7f0413be6e08e2b8188398c69930f8dcfa34"
-PATCHED_SHA256 = "bb51e855da212fb778f265dac05dc4cb49df2f1c8d0162ed3989066b6ab8cc5d"
+PATCHED_SHA256 = "22200c68da0ae3d81d635d04ec8f57687c0c4f07873277758e9180fee4abc1eb"
 SCENE_SCALE_X = "0.744186046511628"  # (1920 * 1440 / 1080) / 3440
 BLUR_WIDTH = b"2580"  # 3440 physical pixels at the UI's 1440/1080 scale
 EXTRA_TAG = b"\x23\x11\x04\x00"
@@ -32,7 +32,10 @@ FIXED_UI_FILES = (
     "App.xaml",
     "Resources/Anthem/Global_Material.xaml",
     "Resources/Anthem/Shared_Bars.xaml",
+    "Resources/Anthem/Shared_LoadingScreens.xaml",
     "Scenes/Anthem/A_Hud.xaml",
+    "Scenes/Anthem/A_Splash.xaml",
+    "Scenes/Anthem/Loading.xaml",
 )
 EXPECTED_BLUR_SCENES = 25
 
@@ -132,6 +135,39 @@ def modified_xaml(name, data):
             b'\t</Style>',
         )
         result = data[: style.start()] + replacement + data[style.end() :]
+    elif name == "Resources/Anthem/Shared_LoadingScreens.xaml":
+        result = data
+        for key in (
+            b"A_Style_FZMaterial_LoadingBackground",
+            b"A_Style_FZMaterial_StaticLoadingBackground",
+        ):
+            style = re.search(rb'<Style x:Key="' + key + rb'".*?</Style>', result, flags=re.S)
+            if style is None or style.group().count(b'<Setter Property="Width" Value="1920" />') != 1:
+                raise ValueError(f"Loading background style {key.decode()} was not found")
+            replacement = style.group().replace(
+                b'<Setter Property="Width" Value="1920" />',
+                b'<Setter Property="Width" Value="2580" />\n'
+                b'            <Setter Property="Stretch" Value="UniformToFill" />',
+            )
+            result = result[: style.start()] + replacement + result[style.end() :]
+    elif name == "Scenes/Anthem/A_Splash.xaml":
+        media = b'<MediaElement x:Name="Video" Style="{StaticResource A_Style_ScreenSize}" />'
+        if data.count(media) != 1:
+            raise ValueError("Splash video was not found exactly once")
+        result = data.replace(
+            media,
+            b'<MediaElement x:Name="Video" Style="{StaticResource A_Style_ScreenSize}" '
+            b'Width="2580" Height="1080" HorizontalAlignment="Center" Stretch="UniformToFill" />',
+        )
+    elif name == "Scenes/Anthem/Loading.xaml":
+        background = b'<local:FZMaterial x:Name="A_CyclingLoadingBackgrounds"'
+        if data.count(background) != 1:
+            raise ValueError("Loading background was not found exactly once")
+        result = data.replace(
+            background,
+            b'<Border Width="2580" Height="1080" HorizontalAlignment="Center" '
+            b'Background="Black" />\n        ' + background,
+        )
     elif name.startswith("Scenes/Anthem/") and name.endswith(".xaml"):
         result = expand_screen_blur(data, name)
     else:

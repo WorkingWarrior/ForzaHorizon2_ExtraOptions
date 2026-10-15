@@ -78,8 +78,9 @@ python3 tools/patch_ultrawide_ui.py apply "/path/to/Anthem_1.0.0.64_x64__8wekyb3
 
 The script supports only the inspected `Mount/media/UI.zip` and saves its
 original as `UI.zip.fh2-ultrawide-original` in the same folder. It changes
-30 XAML resources: the common page scale, HUD, 25 scenes with screen blur, and
-two shared blur styles. It preserves the game's custom ZIP layout. Use `check`
+33 XAML resources: the common page scale, HUD, 25 scenes with screen blur, two
+shared blur styles, and the splash/loading backgrounds. It preserves the game's
+custom ZIP layout. Use `check`
 instead of `apply` to inspect the archive, or `restore` to return it to the
 original bytes. Close the game before either operation.
 
@@ -91,8 +92,9 @@ and the centered UI during driving. The pause menu, car-meet confirmation, and
 car-selection screen were checked at 3440×1440: their controls keep their
 proportions, and the blurred backgrounds fill the screen. The other patched
 scenes passed XAML and archive integrity checks but were not all inspected in
-the running game. The title and loading artwork retain their original 16:9
-composition. Other game modes remain untested.
+the running game. The title video and loading artwork now fill 3440×1440 by
+cropping the original 16:9 image vertically; this was confirmed in a live user
+test. Other game modes remain untested.
 
 # Installation
 
